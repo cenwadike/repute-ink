@@ -110,7 +110,7 @@ mod repute_demo {
         #[ink(message)]
         pub fn get_reputation(&mut self) -> u128 {
             let user = self.env().caller();
-            let user_identifier = self
+            let mut user_identifier = self
                 .user_identifiers
                 .get(&user)
                 .expect("Not a registered user");
@@ -133,6 +133,9 @@ mod repute_demo {
                             .into(),
                     )
                     .unwrap();
+
+                // update user epoch
+                user_identifier.1 = self.epoch;
             }
 
             // side effect check if era is over and update era multiplier
@@ -159,8 +162,7 @@ mod repute_demo {
         /// calculate user reputation to latest epoch
         ///
         /// side effect of call is to trigger reputation for next epoch
-        #[ink(message)]
-        pub fn calculate_reputation_score(
+        fn calculate_reputation_score(
             &self,
             user_epoch: UserReputationEpoch,
             epoch_era: GlobalEpochEra,
