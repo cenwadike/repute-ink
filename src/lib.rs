@@ -1,4 +1,4 @@
-//! this is part of minimum implemntation of repute basic design
+//! this is of minimum implemntation of repute basic design
 //!
 //! This contract implement a time-activity based reputation management system
 
@@ -21,9 +21,9 @@ mod repute_demo {
     /// keep track of system and user specific data
     #[ink(storage)]
     pub struct ReputeDemo {
-        /// stores the current repustation epoch
+        /// record current reputation epoch
         pub epoch: GlobalEpoch,
-        /// maps reputation reputation era to baseline divisor
+        /// map reputation era to baseline multiplier
         pub epoch_reputation_multiplier: Mapping<GlobalEpochEra, GlobalEpochMultiplier>,
         /// map user account is to reputation score
         pub user_identifiers: Mapping<AccountId, (ReputationScore, UserReputationEpoch, Rank)>,
@@ -45,7 +45,7 @@ mod repute_demo {
         epoch_era: GlobalEpochEra,
     }
 
-    /// Event emitted when a request to update epoch era is made
+    /// Event emitted when a request to update epoch era is made.
     #[ink(event)]
     pub struct EraAndMultiplier {
         #[ink(topic)]
@@ -121,7 +121,7 @@ mod repute_demo {
                 score = user_identifier.0;
             } else {
                 // get user reputation score
-                // @notice: call to reputation generator
+                // @notice: call to reputation score generator
                 let raw_score = self.calculate_reputation_score(user_identifier.1, self.epoch);
 
                 // calculate user generated reputation using epoch multiplier
@@ -138,14 +138,14 @@ mod repute_demo {
                 user_identifier.1 = self.epoch;
             }
 
-            // side effect check if era is over and update era multiplier
+            // side effect to check if era is over and update to next era and era multiplier
             self.update_era();
 
             score
         }
 
-        /// get user reputation
-        /// only registered user can call this method
+        /// get a registered user reputation
+        /// any user can call this method
         #[ink(message)]
         pub fn get_user_reputation(&self, user_id: AccountId) -> (ReputationScore, Rank) {
             let (score, _, rank) = self
@@ -184,6 +184,8 @@ mod repute_demo {
             score.into()
         }
 
+	/// update epoch and move to a new era
+	/// update new epoch multiplier
         fn update_era(&mut self) {
             let current_era = self.epoch;
             let current_multiplier = self
