@@ -35,6 +35,7 @@ mod repute {
     pub type GlobalEpoch = u64;
     pub type GlobalEpochEra = u64;
     pub type GlobalEpochMultiplier = u64;
+    pub type RegisteredAt = u64;
     pub type ReputationScore = u128;
     pub type UserReputationEpoch = u64;
 
@@ -59,7 +60,8 @@ mod repute {
         /// map reputation era to baseline multiplier
         pub epoch_reputation_multiplier: Mapping<GlobalEpochEra, GlobalEpochMultiplier>,
         /// map user account is to reputation score
-        pub user_identifiers: Mapping<AccountId, (ReputationScore, UserReputationEpoch, Rank)>,
+        pub user_identifiers:
+            Mapping<AccountId, (RegisteredAt, ReputationScore, UserReputationEpoch, Rank)>,
     }
 
     /// Event emitted when a user registration occurs.
@@ -129,13 +131,14 @@ mod repute {
             }
 
             // create a new user data
+            let now: u64 = self.env().block_number().into();
             let reputation_score: u128 = 0;
             let user_epoch = self.epoch;
             let rank: Rank = Rank::Rookie;
 
             // add new user data to state
             self.user_identifiers
-                .insert(user, &(reputation_score, user_epoch, rank));
+                .insert(user, &(now, reputation_score, user_epoch, rank));
 
             // emit registration event
             Self::env().emit_event(UserRegistered {
@@ -157,13 +160,13 @@ mod repute {
                 .expect("Err: Must be a registered user");
 
             // calculate new reputation score if user epoch is out of sync with global epoch era
-            if user_identifier.1 == self.epoch {
+            if user_identifier.2 == self.epoch {
                 return;
             }
 
             // get user reputation score
             // @notice: call to reputation score generator
-            let raw_score = self.calculate_reputation_score(user_identifier.1, self.epoch);
+            let raw_score = self.calculate_reputation_score(user_identifier.2, self.epoch);
 
             // calculate user generated reputation using epoch multiplier
             raw_score
@@ -176,8 +179,29 @@ mod repute {
                 .unwrap();
 
             // update user epoch
-            user_identifier.1 = self.epoch;
+            user_identifier.2 = self.epoch;
 
+            // attempt to update rank
+            // >=6 months to be a sidekick
+            // >=12 months to be a hero
+            let six_months: u32 = 14400 * 30 * 6;
+            let twelve_months: u32 = 14400 * 30 * 12;
+
+            let existence = self
+                .env()
+                .block_number()
+                .checked_sub(user_identifier.0 as u32)
+                .unwrap();
+
+            if existence > six_months {
+                user_identifier.3 = Rank::SideKick;
+            }
+
+            if existence > twelve_months {
+                user_identifier.3 = Rank::Hero
+            }
+
+            // save update to storage
             self.user_identifiers.insert(user, &user_identifier);
 
             // side effect to check if era is over and update to next era and era multiplier
@@ -185,7 +209,7 @@ mod repute {
 
             Self::env().emit_event(ScoreGenerated {
                 user,
-                user_epoch: user_identifier.1,
+                user_epoch: user_identifier.2,
                 epoch_era: self.epoch,
             });
         }
@@ -197,7 +221,7 @@ mod repute {
             &self,
             user_id: AccountId,
         ) -> (ReputationScore, UserReputationEpoch, Rank) {
-            let (score, epoch, rank) = self
+            let (_, score, epoch, rank) = self
                 .user_identifiers
                 .get(&user_id)
                 .expect("Err: Must be a registered user");
