@@ -1,6 +1,6 @@
-# ReputeDemo contract
+# Repute contract
 
-This repo contains the source code for a minimum smart contract of repute in [ink!](https://use.ink/).
+This repo contains the source code for a minimum smart contract of a reputation system in [ink!](https://use.ink/).
 
 ## How it works
 
