@@ -4,14 +4,15 @@ This repo contains the source code for a minimum smart contract of a reputation 
 
 ## How it works
 
-ReputeDemo at it's core is a book-keeper.
+Repute at it's core is a book-keeper.
 
 It keep track of registered user reputation since their registration.
-User reputation is updated when they interact with this contract.
+
+A user's reputation is updated when they interact with this contract.
 
 Repute demo has an important function ```calculate_reputation_score``` that mocks a time based reputation scoring engine.
 
-ReputeDemo uses score from `calculate_reputation_score` to update user reputation and rank.
+Repute uses score from `calculate_reputation_score` to update user reputation and rank.
 
 ## Development
 
