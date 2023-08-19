@@ -29,7 +29,7 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
 #[ink::contract]
-mod repute_demo {
+mod repute {
     use ink::storage::Mapping;
 
     pub type GlobalEpoch = u64;
@@ -53,7 +53,7 @@ mod repute_demo {
     ///
     /// keep track of system and user specific data
     #[ink(storage)]
-    pub struct ReputeDemo {
+    pub struct Repute {
         /// record current reputation epoch
         pub epoch: GlobalEpoch,
         /// map reputation era to baseline multiplier
@@ -97,7 +97,7 @@ mod repute_demo {
         new_multiplier: GlobalEpochMultiplier,
     }
 
-    impl ReputeDemo {
+    impl Repute {
         #[ink(constructor)]
         pub fn new(multiplier: GlobalEpochMultiplier) -> Self {
             let mut instance = Self::default();
