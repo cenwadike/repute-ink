@@ -1,12 +1,35 @@
 //! this is of minimum implemntation of repute basic design
 //!
 //! This contract implement a time-activity based reputation management system
+//!
+//! `Types`:
+//!
+//!  `Events`:
+//!
+//! `Constructor`:
+//!
+//! * new(multiplier: GlobalEpochMultiplier) -> Self
+//!
+//! `Change methods`:
+//!
+//!  * register(&mut self)
+//!  * update_reputation(&mut self)
+//!
+//!  `View methods`:
+//!
+//!  * get_user_reputation(&self, user_id: AccountId) -> (ReputationScore, UserReputationEpoch, Rank)
+//!
+//!
+//!  `Internal methods`:
+//!
+//!  * calculate_reputation_score&self, user_epoch: UserReputationEpoch, epoch_era: GlobalEpochEra) -> ReputationScore
+//!  * fn update_era(&mut self)
+//!
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(feature = "std"), no_std, no_main)]
 
 #[ink::contract]
 mod repute_demo {
-    use ink::prelude::string::String;
     use ink::storage::Mapping;
 
     pub type GlobalEpoch = u64;
@@ -14,7 +37,17 @@ mod repute_demo {
     pub type GlobalEpochMultiplier = u64;
     pub type ReputationScore = u128;
     pub type UserReputationEpoch = u64;
-    pub type Rank = String;
+
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, scale::Decode, scale::Encode)]
+    #[cfg_attr(
+        feature = "std",
+        derive(ink::storage::traits::StorageLayout, scale_info::TypeInfo)
+    )]
+    pub enum Rank {
+        Rookie,
+        SideKick,
+        Hero,
+    }
 
     /// Global contract state
     ///
@@ -37,9 +70,19 @@ mod repute_demo {
         epoch: UserReputationEpoch,
     }
 
-    /// Event emitted when time based reputation is generated.
+    /// Event emitted when time based reputation is calculated.
+    #[ink(event)]
+    pub struct ScoreCalculated {
+        #[ink(topic)]
+        user_epoch: UserReputationEpoch,
+        epoch_era: GlobalEpochEra,
+    }
+
+    /// Event emitted when user reputation is generated.
     #[ink(event)]
     pub struct ScoreGenerated {
+        #[ink(topic)]
+        user: AccountId,
         #[ink(topic)]
         user_epoch: UserReputationEpoch,
         epoch_era: GlobalEpochEra,
@@ -47,7 +90,7 @@ mod repute_demo {
 
     /// Event emitted when a request to update epoch era is made.
     #[ink(event)]
-    pub struct EraAndMultiplier {
+    pub struct EraAndMultiplierUpdated {
         #[ink(topic)]
         new_epoch: GlobalEpochEra,
         #[ink(topic)]
@@ -76,84 +119,90 @@ mod repute_demo {
         ///
         /// caller's account id is used as identifier to register user on the platform
         ///
-        /// return false if user is already registered.
+        /// panic if user is already registered.
         #[ink(message)]
-        pub fn register(&mut self) -> bool {
+        pub fn register(&mut self) {
             let user = self.env().caller();
 
             if self.user_identifiers.contains(&user) {
-                false
-            } else {
-                // create a new user data
-                let reputation_score: u128 = 0;
-                let user_epoch = self.epoch;
-                let rank: String = String::from("_");
-
-                // add new user data to state
-                self.user_identifiers
-                    .insert(user, &(reputation_score, user_epoch, rank));
-
-                // emit registration event
-                Self::env().emit_event(UserRegistered {
-                    user,
-                    epoch: user_epoch,
-                });
-
-                true
+                panic!("ERR: User already registered");
             }
+
+            // create a new user data
+            let reputation_score: u128 = 0;
+            let user_epoch = self.epoch;
+            let rank: Rank = Rank::Rookie;
+
+            // add new user data to state
+            self.user_identifiers
+                .insert(user, &(reputation_score, user_epoch, rank));
+
+            // emit registration event
+            Self::env().emit_event(UserRegistered {
+                user,
+                epoch: user_epoch,
+            });
         }
 
-        /// get reputation
+        /// update reputation
         /// only registered user can call this method
         ///
         /// mocks user on-chain activity to update user reputation
         #[ink(message)]
-        pub fn get_reputation(&mut self) -> u128 {
+        pub fn update_reputation(&mut self) {
             let user = self.env().caller();
             let mut user_identifier = self
                 .user_identifiers
                 .get(&user)
-                .expect("Not a registered user");
-            let score;
+                .expect("Err: Must be a registered user");
 
             // calculate new reputation score if user epoch is out of sync with global epoch era
             if user_identifier.1 == self.epoch {
-                score = user_identifier.0;
-            } else {
-                // get user reputation score
-                // @notice: call to reputation score generator
-                let raw_score = self.calculate_reputation_score(user_identifier.1, self.epoch);
-
-                // calculate user generated reputation using epoch multiplier
-                score = raw_score
-                    .checked_mul(
-                        self.epoch_reputation_multiplier
-                            .get(self.epoch)
-                            .unwrap()
-                            .into(),
-                    )
-                    .unwrap();
-
-                // update user epoch
-                user_identifier.1 = self.epoch;
+                return;
             }
+
+            // get user reputation score
+            // @notice: call to reputation score generator
+            let raw_score = self.calculate_reputation_score(user_identifier.1, self.epoch);
+
+            // calculate user generated reputation using epoch multiplier
+            raw_score
+                .checked_mul(
+                    self.epoch_reputation_multiplier
+                        .get(self.epoch)
+                        .unwrap()
+                        .into(),
+                )
+                .unwrap();
+
+            // update user epoch
+            user_identifier.1 = self.epoch;
+
+            self.user_identifiers.insert(user, &user_identifier);
 
             // side effect to check if era is over and update to next era and era multiplier
             self.update_era();
 
-            score
+            Self::env().emit_event(ScoreGenerated {
+                user,
+                user_epoch: user_identifier.1,
+                epoch_era: self.epoch,
+            });
         }
 
         /// get a registered user reputation
         /// any user can call this method
         #[ink(message)]
-        pub fn get_user_reputation(&self, user_id: AccountId) -> (ReputationScore, Rank) {
-            let (score, _, rank) = self
+        pub fn get_user_reputation(
+            &self,
+            user_id: AccountId,
+        ) -> (ReputationScore, UserReputationEpoch, Rank) {
+            let (score, epoch, rank) = self
                 .user_identifiers
                 .get(&user_id)
-                .expect("Not a registered user");
+                .expect("Err: Must be a registered user");
 
-            (score, rank)
+            (score, epoch, rank)
         }
 
         /// calculate user reputation score
@@ -166,7 +215,7 @@ mod repute_demo {
             &self,
             user_epoch: UserReputationEpoch,
             epoch_era: GlobalEpochEra,
-        ) -> u128 {
+        ) -> ReputationScore {
             // this is a simple time based reputation engine
             // returns the ratio of user epoch and a reference era
             let score = user_epoch
@@ -176,7 +225,7 @@ mod repute_demo {
                 .unwrap();
 
             // emit generator event
-            Self::env().emit_event(ScoreGenerated {
+            Self::env().emit_event(ScoreCalculated {
                 user_epoch,
                 epoch_era,
             });
@@ -184,14 +233,14 @@ mod repute_demo {
             score.into()
         }
 
-	/// update epoch and move to a new era
-	/// update new epoch multiplier
+        /// update epoch and move to a new era
+        /// update new epoch multiplier
         fn update_era(&mut self) {
             let current_era = self.epoch;
             let current_multiplier = self
                 .epoch_reputation_multiplier
                 .get(current_era)
-                .expect("No multiplier for this epoch");
+                .expect("Err: Multiplier for current epoch");
 
             // check if 24 hours have passed (ie. ~14400 new blocks)
             if (Self::env().block_number() as u64)
@@ -206,13 +255,13 @@ mod repute_demo {
                 // update multiplier
                 // increase multiplier by 1%
                 let new_multiplier = current_multiplier
-                    .checked_add(current_multiplier.checked_div(10).unwrap())
+                    .checked_add(current_multiplier.checked_div(100).unwrap())
                     .unwrap();
                 self.epoch_reputation_multiplier
                     .insert(new_epoch, &new_multiplier);
 
                 // emit epoch current era and multiplier as event
-                Self::env().emit_event(EraAndMultiplier {
+                Self::env().emit_event(EraAndMultiplierUpdated {
                     new_epoch,
                     new_multiplier,
                 });
