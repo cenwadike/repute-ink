@@ -4,7 +4,7 @@
 //!
 //! `Types`:
 //!
-//!  `Events`:
+//! `Events`:
 //!
 //! `Constructor`:
 //!
@@ -22,8 +22,8 @@
 //!
 //!  `Internal methods`:
 //!
-//!  * calculate_reputation_score&self, user_epoch: UserReputationEpoch, epoch_era: GlobalEpochEra) -> ReputationScore
-//!  * fn update_era(&mut self)
+//!  * calculate_reputation_score(&self, user_epoch: UserReputationEpoch, epoch_era: GlobalEpochEra) -> ReputationScore
+//!  * update_era(&mut self)
 //!
 
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
@@ -32,12 +32,12 @@
 mod repute {
     use ink::storage::Mapping;
 
-    pub type GlobalEpoch = u64;
-    pub type GlobalEpochEra = u64;
-    pub type GlobalEpochMultiplier = u64;
-    pub type RegisteredAt = u64;
+    pub type GlobalEpoch = u32;
+    pub type GlobalEpochEra = u32;
+    pub type GlobalEpochMultiplier = u32;
+    pub type RegisteredAt = u32;
     pub type ReputationScore = u128;
-    pub type UserReputationEpoch = u64;
+    pub type UserReputationEpoch = u32;
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq, scale::Decode, scale::Encode)]
     #[cfg_attr(
@@ -59,7 +59,7 @@ mod repute {
         pub epoch: GlobalEpoch,
         /// map reputation era to baseline multiplier
         pub epoch_reputation_multiplier: Mapping<GlobalEpochEra, GlobalEpochMultiplier>,
-        /// map user account is to reputation score
+        /// map user account to reputation score
         pub user_identifiers:
             Mapping<AccountId, (RegisteredAt, ReputationScore, UserReputationEpoch, Rank)>,
     }
@@ -103,7 +103,8 @@ mod repute {
         #[ink(constructor)]
         pub fn new(multiplier: GlobalEpochMultiplier) -> Self {
             let mut instance = Self::default();
-            instance.epoch = Self::env().block_number().into();
+
+            instance.epoch = Self::env().block_number();
             instance
                 .epoch_reputation_multiplier
                 .insert(instance.epoch, &multiplier);
@@ -131,8 +132,8 @@ mod repute {
             }
 
             // create a new user data
-            let now: u64 = self.env().block_number().into();
-            let reputation_score: u128 = 0;
+            let now = self.env().block_number();
+            let reputation_score = ReputationScore::default();
             let user_epoch = self.epoch;
             let rank: Rank = Rank::Rookie;
 
@@ -140,7 +141,7 @@ mod repute {
             self.user_identifiers
                 .insert(user, &(now, reputation_score, user_epoch, rank));
 
-            // emit registration event
+            // emit event for indexing
             Self::env().emit_event(UserRegistered {
                 user,
                 epoch: user_epoch,
@@ -159,9 +160,28 @@ mod repute {
                 .get(&user)
                 .expect("Err: Must be a registered user");
 
-            // calculate new reputation score if user epoch is out of sync with global epoch era
+            // update reputation score if user epoch is out of sync with global epoch era
             if user_identifier.2 == self.epoch {
                 return;
+            }
+
+            let existence = self
+                .env()
+                .block_number()
+                .checked_sub(user_identifier.0 as u32)
+                .unwrap();
+
+            let six_months: u32 = 14400 * 30 * 6;
+            let twelve_months: u32 = 14400 * 30 * 12;
+
+            // >6 months to be a sidekick
+            if existence > six_months {
+                user_identifier.3 = Rank::SideKick;
+            }
+
+            // >12 months to be a hero
+            if existence > twelve_months {
+                user_identifier.3 = Rank::Hero
             }
 
             // get user reputation score
@@ -181,32 +201,13 @@ mod repute {
             // update user epoch
             user_identifier.2 = self.epoch;
 
-            // attempt to update rank
-            // >=6 months to be a sidekick
-            // >=12 months to be a hero
-            let six_months: u32 = 14400 * 30 * 6;
-            let twelve_months: u32 = 14400 * 30 * 12;
-
-            let existence = self
-                .env()
-                .block_number()
-                .checked_sub(user_identifier.0 as u32)
-                .unwrap();
-
-            if existence > six_months {
-                user_identifier.3 = Rank::SideKick;
-            }
-
-            if existence > twelve_months {
-                user_identifier.3 = Rank::Hero
-            }
-
             // save update to storage
             self.user_identifiers.insert(user, &user_identifier);
 
             // side effect to check if era is over and update to next era and era multiplier
             self.update_era();
 
+            // emit event for indexing
             Self::env().emit_event(ScoreGenerated {
                 user,
                 user_epoch: user_identifier.2,
@@ -232,9 +233,7 @@ mod repute {
         /// calculate user reputation score
         ///
         /// mock call to an external time-based reputation engine
-        /// calculate user reputation to latest epoch
-        ///
-        /// side effect of call is to trigger reputation for next epoch
+        /// calculate user reputation in latest epoch
         fn calculate_reputation_score(
             &self,
             user_epoch: UserReputationEpoch,
@@ -248,7 +247,7 @@ mod repute {
                 .checked_div(epoch_era)
                 .unwrap();
 
-            // emit generator event
+            // emit event for indexing
             Self::env().emit_event(ScoreCalculated {
                 user_epoch,
                 epoch_era,
@@ -266,14 +265,14 @@ mod repute {
                 .get(current_era)
                 .expect("Err: Multiplier for current epoch");
 
-            // check if 24 hours have passed (ie. ~14400 new blocks)
-            if (Self::env().block_number() as u64)
+            // check if 24 hours have passed (ie. ~14400 new blocks at 6sec/block)
+            if (Self::env().block_number())
                 .checked_sub(current_era)
                 .unwrap()
                 > 14400
             {
                 // update epoch era
-                self.epoch = Self::env().block_number().into();
+                self.epoch = Self::env().block_number();
                 let new_epoch = self.epoch;
 
                 // update multiplier
@@ -281,10 +280,11 @@ mod repute {
                 let new_multiplier = current_multiplier
                     .checked_add(current_multiplier.checked_div(100).unwrap())
                     .unwrap();
+
                 self.epoch_reputation_multiplier
                     .insert(new_epoch, &new_multiplier);
 
-                // emit epoch current era and multiplier as event
+                // emit event for indexing
                 Self::env().emit_event(EraAndMultiplierUpdated {
                     new_epoch,
                     new_multiplier,
