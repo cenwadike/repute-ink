@@ -10,7 +10,7 @@ It keep track of registered user reputation since their registration.
 
 A user's reputation is updated when they interact with this contract.
 
-Repute demo has an important function ```calculate_reputation_score``` that mocks a time based reputation scoring engine.
+Repute has an important function ```calculate_reputation_score``` that mocks a time based reputation scoring engine.
 
 Repute uses score from `calculate_reputation_score` to update user reputation and rank.
 
